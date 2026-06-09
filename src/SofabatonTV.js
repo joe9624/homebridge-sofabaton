@@ -78,7 +78,8 @@ class SofabatonTV {
 
     this.tvService.getCharacteristic(this.Characteristic.ActiveIdentifier)
       .onGet(() => this._getActiveIdentifier())
-      .onSet((value) => this._handleInputSet(value));
+      .onSet((value) => this._handleInputSet(value))
+      .updateValue(this._getActiveIdentifier());
 
     this.tvService.getCharacteristic(this.Characteristic.RemoteKey)
       .onSet((value) => this._handleRemoteKey(value));
@@ -161,10 +162,9 @@ class SofabatonTV {
     }
     this.log.info(`Input → "${activity.activity_name}" (id ${activity.activity_id})`);
 
-    // Turn off current activity first if a different one is running
-    if (this.currentActivityId !== null && this.currentActivityId !== activity.activity_id) {
-      this.mqtt.controlActivity(this.currentActivityId, 'off');
-    }
+    // Just send "on" for the new activity — the hub automatically stops
+    // the current activity when a new one is started. Sending an explicit
+    // "off" first causes the hub to cut power to everything before switching.
     this.mqtt.controlActivity(activity.activity_id, 'on');
   }
 
