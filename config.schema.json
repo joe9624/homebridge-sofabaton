@@ -11,78 +11,47 @@
         "default": "Sofabaton",
         "description": "Display name for the TV accessory in Apple Home."
       },
-      "nodeId": {
-        "title": "Node ID",
+      "host": {
+        "title": "MQTT Broker Host",
         "type": "string",
-        "description": "Your Sofabaton node ID. Find it in the Sofabaton app under Me → API Interface — copy the node_id value from any of the URLs shown."
+        "description": "IP address or hostname of your MQTT broker (e.g. Mosquitto). This is NOT the hub IP — it is the broker the hub connects to."
+      },
+      "port": {
+        "title": "MQTT Broker Port",
+        "type": "integer",
+        "default": 1883,
+        "description": "MQTT broker port. Default is 1883."
+      },
+      "mac": {
+        "title": "Hub MAC Address",
+        "type": "string",
+        "description": "MAC address of your Sofabaton X2 hub (e.g. AABBCCDDEEFF). Used to build MQTT topic names. Find it in your router's device list or the Sofabaton app."
+      },
+      "username": {
+        "title": "MQTT Username",
+        "type": "string",
+        "description": "Optional. Username for your MQTT broker if authentication is enabled."
+      },
+      "password": {
+        "title": "MQTT Password",
+        "type": "string",
+        "description": "Optional. Password for your MQTT broker if authentication is enabled."
       },
       "mainActivity": {
         "title": "Main Activity",
         "type": "string",
-        "description": "Activity to launch when you tap the power button in Apple Home. Must match an activity name exactly."
-      },
-      "activities": {
-        "title": "Activities",
-        "type": "array",
-        "items": {
-          "type": "string"
-        },
-        "description": "List of activity names to expose as inputs in Apple Home. Names must match exactly as shown in the Sofabaton app API Interface screen."
-      },
-      "remoteOverrideCommandsList": {
-        "title": "Remote Key Overrides",
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "key": {
-              "title": "HomeKit Remote Key",
-              "type": "string",
-              "enum": [
-                "ARROW_UP",
-                "ARROW_DOWN",
-                "ARROW_LEFT",
-                "ARROW_RIGHT",
-                "SELECT",
-                "BACK",
-                "EXIT",
-                "PLAY_PAUSE",
-                "INFORMATION",
-                "REWIND",
-                "FAST_FORWARD",
-                "NEXT_TRACK",
-                "PREVIOUS_TRACK"
-              ]
-            },
-            "command": {
-              "title": "Command",
-              "type": "string"
-            }
-          },
-          "required": ["key", "command"]
-        }
+        "description": "Activity to launch when you tap the power button in Apple Home. Must match an activity name exactly as shown in the Sofabaton app."
       }
     },
-    "required": ["nodeId", "activities"]
+    "required": ["host", "mac"]
   },
   "form": [
     "name",
-    "nodeId",
-    "mainActivity",
-    {
-      "key": "activities",
-      "type": "array",
-      "title": "Activities",
-      "items": [{ "key": "activities[]", "title": "Activity Name" }]
-    },
-    {
-      "key": "remoteOverrideCommandsList",
-      "type": "array",
-      "title": "Remote Key Overrides",
-      "items": [
-        { "key": "remoteOverrideCommandsList[].key", "title": "Key" },
-        { "key": "remoteOverrideCommandsList[].command", "title": "Command" }
-      ]
-    }
+    "host",
+    "port",
+    "mac",
+    "username",
+    "password",
+    "mainActivity"
   ]
 }

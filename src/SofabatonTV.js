@@ -1,47 +1,64 @@
 'use strict';
 
-const { REMOTE_KEY_COMMANDS, VOLUME_COMMANDS } = require('./SofabatonConst');
+const { REMOTE_KEY_MAP, STOP_ALL_ACTIVITY_ID } = require('./SofabatonConst');
 
 class SofabatonTV {
-  constructor(log, config, api, sofabatonAPI) {
+  constructor(log, config, api, mqtt) {
     this.log = log;
     this.config = config;
-    this.api = sofabatonAPI;
-    this.sofabatonAPI = sofabatonAPI;
+    this.hapApi = api;
+    this.mqtt = mqtt;
 
     this.name = config.name || 'Sofabaton';
-    this.activities = config.activities || [];
-    this.mainActivity = config.mainActivity || this.activities[0] || null;
+    this.mainActivityName = config.mainActivity || null;
 
-    // Build override map: { REMOTE_KEY: commandString }
-    this.remoteOverrides = {};
-    if (Array.isArray(config.remoteOverrideCommandsList)) {
-      for (const entry of config.remoteOverrideCommandsList) {
-        if (entry.key && entry.command) {
-          this.remoteOverrides[entry.key] = entry.command;
-        }
-      }
-    }
+    // Populated after activity list is fetched: [ { activity_id, activity_name, state } ]
+    this.activities = [];
+    this.activityById = new Map();   // id  → activity object
+    this.activityByName = new Map(); // name → activity object
 
-    // Optimistic state — tracked locally since the cloud API has no push notifications
-    this.currentActivity = null;
+    // Current state — kept in sync by activity_control_up pushes from hub
+    this.currentActivityId = null;
     this.isOn = false;
 
     const { Service, Characteristic } = api.hap;
     this.Service = Service;
     this.Characteristic = Characteristic;
-    this.hapApi = api;
+
+    // Input services created dynamically once activities are known
+    this.inputServices = [];
   }
 
-  // Called by the platform to wire up all HomeKit services on the accessory.
-  getServices(accessory) {
+  // Called by the platform once the activity list has been fetched.
+  // Stores activities and wires up all HomeKit services.
+  setupWithActivities(accessory, activities) {
+    this.activities = activities;
+    activities.forEach((a) => {
+      this.activityById.set(a.activity_id, a);
+      this.activityByName.set(a.activity_name, a);
+    });
+
+    // Seed current state from what the hub reports
+    const active = activities.find((a) => a.state === 'on');
+    if (active) {
+      this.currentActivityId = active.activity_id;
+      this.isOn = true;
+    }
+
+    this._buildServices(accessory);
+
+    // Listen for real-time state pushes from the hub (physical remote presses)
+    this.mqtt.on('activityState', (data) => this._onActivityState(data));
+  }
+
+  _buildServices(accessory) {
     // --- Accessory Information ---
-    const infoService = accessory.getService(this.Service.AccessoryInformation)
+    const info = accessory.getService(this.Service.AccessoryInformation)
       || accessory.addService(this.Service.AccessoryInformation);
-    infoService
+    info
       .setCharacteristic(this.Characteristic.Manufacturer, 'Sofabaton')
       .setCharacteristic(this.Characteristic.Model, 'X2')
-      .setCharacteristic(this.Characteristic.SerialNumber, this.config.nodeId || 'Unknown');
+      .setCharacteristic(this.Characteristic.SerialNumber, this.config.mac || 'Unknown');
 
     // --- Television ---
     this.tvService = accessory.getService(this.Service.Television)
@@ -66,7 +83,7 @@ class SofabatonTV {
     this.tvService.getCharacteristic(this.Characteristic.RemoteKey)
       .onSet((value) => this._handleRemoteKey(value));
 
-    // --- Speaker (volume) ---
+    // --- Speaker ---
     this.speakerService = accessory.getService(this.Service.TelevisionSpeaker)
       || accessory.addService(this.Service.TelevisionSpeaker, `${this.name} Speaker`, 'speaker');
 
@@ -79,32 +96,26 @@ class SofabatonTV {
 
     this.speakerService.getCharacteristic(this.Characteristic.VolumeSelector)
       .onSet((value) => {
-        const cmd = value === this.Characteristic.VolumeSelector.INCREMENT
-          ? VOLUME_COMMANDS.UP
-          : VOLUME_COMMANDS.DOWN;
-        this.log.info(`Volume: ${cmd}`);
-        // Volume commands are not supported by the Sofabaton cloud API —
-        // they require a local connection. Log for now.
-        this.log.warn('Volume control is not supported by the Sofabaton cloud API');
+        const keyName = value === this.Characteristic.VolumeSelector.INCREMENT
+          ? 'VOLUME_UP' : 'VOLUME_DOWN';
+        this._sendKey(keyName);
       });
 
     this.speakerService.getCharacteristic(this.Characteristic.Mute)
       .onGet(() => false)
-      .onSet(() => {
-        this.log.warn('Mute is not supported by the Sofabaton cloud API');
-      });
+      .onSet(() => this._sendKey('MUTE'));
 
     this.tvService.addLinkedService(this.speakerService);
 
-    // --- InputSource (one per activity) ---
-    this.inputServices = [];
-    this.activities.forEach((activityName, index) => {
-      const inputService = accessory.getService(`input_${index}`)
-        || accessory.addService(this.Service.InputSource, activityName, `input_${index}`);
+    // --- InputSource — one per activity ---
+    this.activities.forEach((activity, index) => {
+      const subtype = `input_${activity.activity_id}`;
+      const inputService = accessory.getService(subtype)
+        || accessory.addService(this.Service.InputSource, activity.activity_name, subtype);
 
       inputService
         .setCharacteristic(this.Characteristic.Identifier, index)
-        .setCharacteristic(this.Characteristic.ConfiguredName, activityName)
+        .setCharacteristic(this.Characteristic.ConfiguredName, activity.activity_name)
         .setCharacteristic(this.Characteristic.IsConfigured, this.Characteristic.IsConfigured.CONFIGURED)
         .setCharacteristic(this.Characteristic.InputSourceType, this.Characteristic.InputSourceType.APPLICATION)
         .setCharacteristic(this.Characteristic.CurrentVisibilityState, this.Characteristic.CurrentVisibilityState.SHOWN);
@@ -112,72 +123,102 @@ class SofabatonTV {
       this.tvService.addLinkedService(inputService);
       this.inputServices.push(inputService);
     });
+
+    this.log.info(`TV accessory built with ${this.activities.length} inputs`);
   }
 
+  // ─── Characteristic handlers ─────────────────────────────────────────────
+
   _getActiveIdentifier() {
-    if (!this.currentActivity) return 0;
-    const idx = this.activities.indexOf(this.currentActivity);
+    if (this.currentActivityId === null) return 0;
+    const idx = this.activities.findIndex((a) => a.activity_id === this.currentActivityId);
     return idx >= 0 ? idx : 0;
   }
 
-  async _handleActiveSet(value) {
+  _handleActiveSet(value) {
     if (value === this.Characteristic.Active.ACTIVE) {
-      const activity = this.mainActivity;
+      const activity = this.mainActivityName
+        ? this.activityByName.get(this.mainActivityName)
+        : this.activities[0];
+
       if (!activity) {
-        this.log.warn('No mainActivity configured — cannot power on');
+        this.log.warn('Power ON: no mainActivity found');
         return;
       }
-      this.log.info(`Power ON → activating "${activity}"`);
-      await this.sofabatonAPI.activateActivity(activity);
-      this.currentActivity = activity;
-      this.isOn = true;
-      const idx = this.activities.indexOf(activity);
-      if (idx >= 0) {
-        this.tvService.updateCharacteristic(this.Characteristic.ActiveIdentifier, idx);
-      }
+      this.log.info(`Power ON → "${activity.activity_name}" (id ${activity.activity_id})`);
+      this.mqtt.controlActivity(activity.activity_id, 'on');
     } else {
-      if (this.currentActivity) {
-        this.log.info(`Power OFF → deactivating "${this.currentActivity}"`);
-        await this.sofabatonAPI.deactivateActivity(this.currentActivity);
-      }
-      this.currentActivity = null;
-      this.isOn = false;
+      this.log.info('Power OFF → stopping all activities');
+      this.mqtt.controlActivity(STOP_ALL_ACTIVITY_ID, 'off');
     }
   }
 
-  async _handleInputSet(index) {
+  _handleInputSet(index) {
     const activity = this.activities[index];
     if (!activity) {
       this.log.warn(`No activity at index ${index}`);
       return;
     }
-    this.log.info(`Switching to activity: "${activity}"`);
+    this.log.info(`Input → "${activity.activity_name}" (id ${activity.activity_id})`);
 
-    // Turn off the current activity first if one is running
-    if (this.currentActivity && this.currentActivity !== activity) {
-      await this.sofabatonAPI.deactivateActivity(this.currentActivity);
+    // Turn off current activity first if a different one is running
+    if (this.currentActivityId !== null && this.currentActivityId !== activity.activity_id) {
+      this.mqtt.controlActivity(this.currentActivityId, 'off');
     }
-
-    await this.sofabatonAPI.activateActivity(activity);
-    this.currentActivity = activity;
-    this.isOn = true;
-
-    this.tvService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.ACTIVE);
+    this.mqtt.controlActivity(activity.activity_id, 'on');
   }
 
   _handleRemoteKey(key) {
     const { RemoteKey } = this.Characteristic;
     const keyName = Object.keys(RemoteKey).find((k) => RemoteKey[k] === key);
-    const command = this.remoteOverrides[keyName] || REMOTE_KEY_COMMANDS[keyName] || null;
+    this._sendKey(keyName);
+  }
 
-    if (!command) {
-      this.log.warn(`No command mapped for RemoteKey ${keyName || key}`);
+  _sendKey(keyName) {
+    if (!keyName || !(keyName in REMOTE_KEY_MAP)) {
+      this.log.warn(`No key ID mapped for "${keyName}"`);
+      return;
+    }
+    if (this.currentActivityId === null) {
+      this.log.warn(`Key "${keyName}" ignored — no active activity`);
+      return;
+    }
+    const keyId = REMOTE_KEY_MAP[keyName];
+    this.log.info(`Key "${keyName}" → id ${keyId} (activity ${this.currentActivityId})`);
+    this.mqtt.sendKey(this.currentActivityId, keyId);
+  }
+
+  // ─── Real-time state from hub ─────────────────────────────────────────────
+
+  // Called when the hub pushes an activity_control_up message.
+  // This fires both when commands are confirmed AND when the physical remote is used.
+  _onActivityState(data) {
+    const { activity_id, state } = data;
+
+    if (state === 'off' || activity_id === STOP_ALL_ACTIVITY_ID) {
+      if (this.currentActivityId !== null) {
+        this.log.info(`Hub: activity ${this.currentActivityId} stopped`);
+      }
+      this.currentActivityId = null;
+      this.isOn = false;
+      this.tvService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.INACTIVE);
       return;
     }
 
-    // Remote key commands (cursor, back, etc.) are not supported by the cloud API.
-    // This is a limitation of the Sofabaton cloud API — it only supports activity on/off.
-    this.log.warn(`RemoteKey "${keyName}" → command "${command}" is not supported by the Sofabaton cloud API`);
+    if (state === 'on') {
+      const activity = this.activityById.get(activity_id);
+      const name = activity ? activity.activity_name : `id:${activity_id}`;
+      this.log.info(`Hub: activity "${name}" is now ON`);
+
+      this.currentActivityId = activity_id;
+      this.isOn = true;
+
+      const idx = this.activities.findIndex((a) => a.activity_id === activity_id);
+      this.tvService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.ACTIVE);
+      if (idx >= 0) {
+        this.tvService.updateCharacteristic(this.Characteristic.ActiveIdentifier, idx);
+      }
+    }
   }
 }
 
