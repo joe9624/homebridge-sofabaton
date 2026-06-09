@@ -1,7 +1,7 @@
 {
   "name": "homebridge-sofabaton",
-  "version": "1.0.0",
-  "description": "Homebridge plugin for Sofabaton X2 hub — exposes activities as a HomeKit TV accessory",
+  "version": "2.0.0",
+  "description": "Homebridge plugin for Sofabaton remotes — exposes activities as a HomeKit TV accessory",
   "main": "index.js",
   "keywords": [
     "homebridge-plugin",
@@ -15,10 +15,7 @@
     "node": ">=14.0.0",
     "homebridge": ">=1.3.0"
   },
-  "dependencies": {
-    "bonjour-service": "^1.1.1",
-    "mqtt": "^5.3.4"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "homebridge": ">=1.3.0"
   },

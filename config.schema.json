@@ -11,28 +11,23 @@
         "default": "Sofabaton",
         "description": "Display name for the TV accessory in Apple Home."
       },
-      "hubIP": {
-        "title": "Hub IP Address",
+      "nodeId": {
+        "title": "Node ID",
         "type": "string",
-        "description": "IP address of the Sofabaton X2 hub. Leave blank to use mDNS auto-discovery."
-      },
-      "hubMac": {
-        "title": "Hub MAC Address",
-        "type": "string",
-        "description": "MAC address of the Sofabaton X2 hub (used for MQTT topics). Leave blank to auto-detect."
+        "description": "Your Sofabaton node ID. Find it in the Sofabaton app under Me → API Interface — copy the node_id value from any of the URLs shown."
       },
       "mainActivity": {
         "title": "Main Activity",
         "type": "string",
-        "description": "Activity to launch when the TV is powered on from Apple Home."
+        "description": "Activity to launch when you tap the power button in Apple Home. Must match an activity name exactly."
       },
       "activities": {
-        "title": "Activities (Fallback)",
+        "title": "Activities",
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Optional. Activity names are auto-discovered from the hub at startup. Only fill this in as a fallback if auto-discovery fails."
+        "description": "List of activity names to expose as inputs in Apple Home. Names must match exactly as shown in the Sofabaton app API Interface screen."
       },
       "remoteOverrideCommandsList": {
         "title": "Remote Key Overrides",
@@ -60,22 +55,19 @@
               ]
             },
             "command": {
-              "title": "Sofabaton Command",
-              "type": "string",
-              "description": "MQTT command string to send (e.g. cursor_up, volume_up, play_pause)"
+              "title": "Command",
+              "type": "string"
             }
           },
           "required": ["key", "command"]
-        },
-        "description": "Override the default command sent for a HomeKit remote button press."
+        }
       }
     },
-    "required": []
+    "required": ["nodeId", "activities"]
   },
   "form": [
     "name",
-    "hubIP",
-    "hubMac",
+    "nodeId",
     "mainActivity",
     {
       "key": "activities",
