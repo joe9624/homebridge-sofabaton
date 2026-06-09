@@ -1,0 +1,96 @@
+{
+  "pluginAlias": "SofabatonPlatform",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Sofabaton",
+        "description": "Display name for the TV accessory in Apple Home."
+      },
+      "hubIP": {
+        "title": "Hub IP Address",
+        "type": "string",
+        "description": "IP address of the Sofabaton X2 hub. Leave blank to use mDNS auto-discovery."
+      },
+      "hubMac": {
+        "title": "Hub MAC Address",
+        "type": "string",
+        "description": "MAC address of the Sofabaton X2 hub (used for MQTT topics). Leave blank to auto-detect."
+      },
+      "mainActivity": {
+        "title": "Main Activity",
+        "type": "string",
+        "description": "Activity to launch when the TV is powered on from Apple Home."
+      },
+      "activities": {
+        "title": "Activities (Fallback)",
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional. Activity names are auto-discovered from the hub at startup. Only fill this in as a fallback if auto-discovery fails."
+      },
+      "remoteOverrideCommandsList": {
+        "title": "Remote Key Overrides",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "title": "HomeKit Remote Key",
+              "type": "string",
+              "enum": [
+                "ARROW_UP",
+                "ARROW_DOWN",
+                "ARROW_LEFT",
+                "ARROW_RIGHT",
+                "SELECT",
+                "BACK",
+                "EXIT",
+                "PLAY_PAUSE",
+                "INFORMATION",
+                "REWIND",
+                "FAST_FORWARD",
+                "NEXT_TRACK",
+                "PREVIOUS_TRACK"
+              ]
+            },
+            "command": {
+              "title": "Sofabaton Command",
+              "type": "string",
+              "description": "MQTT command string to send (e.g. cursor_up, volume_up, play_pause)"
+            }
+          },
+          "required": ["key", "command"]
+        },
+        "description": "Override the default command sent for a HomeKit remote button press."
+      }
+    },
+    "required": []
+  },
+  "form": [
+    "name",
+    "hubIP",
+    "hubMac",
+    "mainActivity",
+    {
+      "key": "activities",
+      "type": "array",
+      "title": "Activities",
+      "items": [{ "key": "activities[]", "title": "Activity Name" }]
+    },
+    {
+      "key": "remoteOverrideCommandsList",
+      "type": "array",
+      "title": "Remote Key Overrides",
+      "items": [
+        { "key": "remoteOverrideCommandsList[].key", "title": "Key" },
+        { "key": "remoteOverrideCommandsList[].command", "title": "Command" }
+      ]
+    }
+  ]
+}
